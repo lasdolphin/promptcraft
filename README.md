@@ -1,4 +1,4 @@
-# Minecraft AI Builder
+# Promptcraft
 
 Пишешь в чат Minecraft Education/Bedrock `ai замок с башнями`, модель пишет Python-скрипт,
 скрипт строит замок. Скрипты можно читать, менять и писать свои.
@@ -39,3 +39,26 @@ set -a; . ./.env; set +a
 
 `tools/fake_llm.py` — поддельная модель для проверки команды `ai` без LiteLLM.
 # promptcraft
+
+## Деплой в кластер
+
+Образ моста собирает GitHub Actions при push в `main`: `ghcr.io/lasdolphin/promptcraft-bridge`.
+Манифесты в `k8s/`, их синхронизирует ArgoCD (namespace `promptcraft`):
+
+| Что | Зачем |
+|---|---|
+| `bedrock/` | сервер Bedrock (творческий режим, allow-list), UDP 19132 через MetalLB |
+| `playit/` | агент playit.gg — друзья заходят снаружи |
+| `bridge/` | мост для `/connect` из Minecraft Education, наружу через Cloudflare Tunnel |
+
+Секреты берутся из 1Password (vault `antfarm.dev`): `playit-agent` (поле `password`),
+`minecraft-litellm` (поле `LITELLM_API_KEY`), `promptcraft-bridge-token` (поле `password`).
+
+Один раз:
+1. После первой сборки сделать пакет `promptcraft-bridge` публичным (GitHub → Packages → Settings).
+2. `kubectl apply -f k8s/argocd-app.yaml`
+3. В cosmo-fleet добавить правило cloudflared для `promptcraft.antfarm.dev`.
+4. В панели playit.gg: туннель Minecraft Bedrock → адрес сервиса `bedrock` (`kubectl -n promptcraft get svc bedrock`), порт 19132.
+
+Добавить друга: гейммтег в `ALLOW_LIST_USERS` в `k8s/bedrock/deployment.yaml`.
+Консоль сервера: `kubectl -n promptcraft exec deploy/bedrock -- send-command <команда>`.

@@ -1,0 +1,14 @@
+# LoadBalancer — чтобы дома подключаться напрямую: /connect <ip>:8765/<токен>
+apiVersion: v1
+kind: Service
+metadata:
+  name: bridge
+spec:
+  type: LoadBalancer
+  selector:
+    app: bridge
+  ports:
+    - name: ws
+      port: 8765
+      targetPort: 8765
+      protocol: TCP

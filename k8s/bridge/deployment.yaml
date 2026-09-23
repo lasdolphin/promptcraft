@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bridge
+  labels:
+    app: bridge
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: bridge
+  template:
+    metadata:
+      labels:
+        app: bridge
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      containers:
+        - name: bridge
+          image: ghcr.io/lasdolphin/promptcraft-bridge:latest
+          imagePullPolicy: Always
+          envFrom:
+            - configMapRef:
+                name: bridge
+          env:
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minecraft-litellm
+                  key: LITELLM_API_KEY
+            - name: BRIDGE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: promptcraft-bridge-token
+                  key: password
+          ports:
+            - containerPort: 8765
+              name: ws
+          readinessProbe:
+            tcpSocket:
+              port: 8765
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 1Gi
+          volumeMounts:
+            - name: scripts
+              mountPath: /data/scripts
+      volumes:
+        - name: scripts
+          persistentVolumeClaim:
+            claimName: bridge-scripts

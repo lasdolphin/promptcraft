@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: playit
+  labels:
+    app: playit
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: playit
+  template:
+    metadata:
+      labels:
+        app: playit
+    spec:
+      containers:
+        - name: playit
+          image: ghcr.io/playit-cloud/playit-agent:1.0.10
+          env:
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: playit-agent
+                  key: password
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
