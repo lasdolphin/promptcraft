@@ -9,11 +9,7 @@ spec:
   selector:
     app: bedrock
   ports:
-    - name: bedrock-tcp
+    - name: bedrock
       port: 19132
       targetPort: 19132
       protocol: TCP
-    - name: bedrock-udp
-      port: 19132
-      targetPort: 19132
-      protocol: UDP

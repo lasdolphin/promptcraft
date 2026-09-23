@@ -53,15 +53,11 @@ spec:
               value: Mattomelette
             - name: DEFAULT_PLAYER_PERMISSION_LEVEL
               value: member
-          # Bedrock 1.26 принимает клиентов по TCP 19132 (раньше был UDP/RakNet);
-          # UDP оставлен для старых клиентов и LAN
+          # Bedrock 1.26 принимает клиентов по TCP 19132 (раньше был UDP/RakNet)
           ports:
             - containerPort: 19132
               protocol: TCP
-              name: bedrock-tcp
-            - containerPort: 19132
-              protocol: UDP
-              name: bedrock-udp
+              name: bedrock
           readinessProbe:
             tcpSocket:
               port: 19132
