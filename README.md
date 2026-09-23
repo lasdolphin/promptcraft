@@ -47,7 +47,7 @@ set -a; . ./.env; set +a
 
 | Что | Зачем |
 |---|---|
-| `bedrock/` | сервер Bedrock (творческий режим, allow-list), UDP 19132 через MetalLB |
+| `bedrock/` | сервер Bedrock (творческий режим, allow-list), TCP 19132 через MetalLB |
 | `playit/` | агент playit.gg — друзья заходят снаружи |
 | `bridge/` | мост для `/connect` из Minecraft Education, наружу через Cloudflare Tunnel |
 
@@ -58,7 +58,8 @@ set -a; . ./.env; set +a
 1. После первой сборки сделать пакет `promptcraft-bridge` публичным (GitHub → Packages → Settings).
 2. `kubectl apply -f k8s/argocd-app.yaml`
 3. В cosmo-fleet добавить правило cloudflared для `promptcraft.antfarm.dev`.
-4. В панели playit.gg: туннель Minecraft Bedrock → адрес сервиса `bedrock` (`kubectl -n promptcraft get svc bedrock`), порт 19132.
+4. В панели playit.gg: TCP-туннель → адрес сервиса `bedrock` (`kubectl -n promptcraft get svc bedrock`), порт 19132.
+   Bedrock 1.26 слушает TCP, а не UDP, поэтому готовый тип «Minecraft Bedrock» (UDP) не подойдёт.
 
 Добавить друга: гейммтег в `ALLOW_LIST_USERS` в `k8s/bedrock/deployment.yaml`.
 Консоль сервера: `kubectl -n promptcraft exec deploy/bedrock -- send-command <команда>`.
