@@ -4,7 +4,6 @@ namespace: promptcraft
 
 resources:
   - namespace.yaml
-  - minecraft/onepassword-item.yaml
   - minecraft/pvc.yaml
   - minecraft/deployment.yaml
   - minecraft/service.yaml

@@ -63,8 +63,8 @@ RCON_PASSWORD=secret MC_LOG_CMD="docker logs -f --since 0s mc" .venv/bin/python 
 | `bridge/` | под моста: `bridge` — для `/connect` из Education (наружу через Cloudflare Tunnel), `java-bridge` — для сервера Java (RCON + чат из лога пода `minecraft`) |
 
 Секреты берутся из 1Password (vault `antfarm.dev`): `playit-agent` (поле `password`),
-`minecraft-litellm` (поле `LITELLM_API_KEY`), `promptcraft-bridge-token` (поле `password`),
-`promptcraft-rcon` (поле `password`, любой длинный случайный пароль).
+`minecraft-litellm` (поле `LITELLM_API_KEY`), `promptcraft-bridge-token` (поле `password`;
+он же пароль RCON сервера — RCON доступен только внутри кластера).
 
 Один раз:
 1. После первой сборки сделать пакет `promptcraft-bridge` публичным (GitHub → Packages → Settings).

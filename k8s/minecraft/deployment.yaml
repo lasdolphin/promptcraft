@@ -55,7 +55,7 @@ spec:
             - name: RCON_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: promptcraft-rcon
+                  name: promptcraft-bridge-token
                   key: password
             - name: BROADCAST_RCON_TO_OPS
               value: "false"
