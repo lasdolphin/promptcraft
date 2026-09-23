@@ -4,13 +4,15 @@ namespace: promptcraft
 
 resources:
   - namespace.yaml
-  - bedrock/pvc.yaml
-  - bedrock/deployment.yaml
-  - bedrock/service.yaml
+  - minecraft/onepassword-item.yaml
+  - minecraft/pvc.yaml
+  - minecraft/deployment.yaml
+  - minecraft/service.yaml
   - playit/onepassword-item.yaml
   - playit/deployment.yaml
   - bridge/onepassword-items.yaml
   - bridge/configmap.yaml
+  - bridge/rbac.yaml
   - bridge/pvc.yaml
   - bridge/deployment.yaml
   - bridge/service.yaml

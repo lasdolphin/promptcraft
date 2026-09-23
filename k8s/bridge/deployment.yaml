@@ -18,6 +18,8 @@ spec:
     spec:
       # иначе Kubernetes добавит BRIDGE_PORT=tcp://... от сервиса bridge
       enableServiceLinks: false
+      # java-bridge читает лог пода minecraft (k8s/bridge/rbac.yaml)
+      serviceAccountName: bridge
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -53,6 +55,41 @@ spec:
           resources:
             requests:
               cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 1Gi
+          volumeMounts:
+            - name: scripts
+              mountPath: /data/scripts
+        # Тот же образ: команды из чата сервера Java (k8s/minecraft) — по RCON.
+        # Скрипты на общем диске, поэтому run <имя> работает в обеих играх.
+        - name: java-bridge
+          image: ghcr.io/lasdolphin/promptcraft-bridge:latest
+          imagePullPolicy: Always
+          command: ["python", "-m", "mcai.java_bridge"]
+          envFrom:
+            - configMapRef:
+                name: bridge
+          env:
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minecraft-litellm
+                  key: LITELLM_API_KEY
+            - name: RCON_HOST
+              value: minecraft-rcon
+            - name: RCON_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: promptcraft-rcon
+                  key: password
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
               memory: 128Mi
             limits:
               memory: 1Gi

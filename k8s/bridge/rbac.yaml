@@ -1,0 +1,29 @@
+# java-bridge читает чат из лога пода minecraft через Kubernetes API
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: bridge
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: bridge-read-minecraft-log
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: bridge-read-minecraft-log
+subjects:
+  - kind: ServiceAccount
+    name: bridge
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: bridge-read-minecraft-log

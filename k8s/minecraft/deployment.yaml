@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minecraft
+  labels:
+    app: minecraft
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: minecraft
+  template:
+    metadata:
+      labels:
+        app: minecraft
+    spec:
+      enableServiceLinks: false
+      containers:
+        # имя контейнера важно: java-bridge читает чат из его лога
+        - name: minecraft
+          image: itzg/minecraft-server:2026.9.1
+          # консоль сервера: kubectl -n promptcraft exec deploy/minecraft -- rcon-cli <команда>
+          env:
+            - name: EULA
+              value: "TRUE"
+            - name: TYPE
+              value: PAPER
+            - name: VERSION
+              value: LATEST
+            - name: MOTD
+              value: Promptcraft
+            - name: LEVEL
+              value: promptcraft
+            - name: MODE
+              value: creative
+            - name: DIFFICULTY
+              value: peaceful
+            - name: ONLINE_MODE
+              value: "true"
+            - name: MAX_PLAYERS
+              value: "10"
+            - name: SPAWN_PROTECTION
+              value: "0"
+            # Друзей добавлять командой (сохраняется на диске):
+            #   kubectl -n promptcraft exec deploy/minecraft -- rcon-cli whitelist add <ник Java>
+            - name: ENABLE_WHITELIST
+              value: "true"
+            - name: ENFORCE_WHITELIST
+              value: "true"
+            # по RCON ходит java-bridge (контейнер в поде bridge)
+            - name: ENABLE_RCON
+              value: "true"
+            - name: RCON_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: promptcraft-rcon
+                  key: password
+            - name: BROADCAST_RCON_TO_OPS
+              value: "false"
+            - name: MEMORY
+              value: 3G
+            - name: USE_AIKAR_FLAGS
+              value: "true"
+          ports:
+            - containerPort: 25565
+              name: minecraft
+            - containerPort: 25575
+              name: rcon
+          readinessProbe:
+            exec:
+              command: ["mc-health"]
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 1000m
+              memory: 3Gi
+            limits:
+              memory: 4Gi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: minecraft-data

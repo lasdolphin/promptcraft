@@ -4,7 +4,7 @@ import re
 
 import httpx
 
-SYSTEM_PROMPT = """You write Python scripts that build structures in Minecraft (Bedrock/Education edition).
+SYSTEM_PROMPT = """You write Python scripts that build structures in Minecraft (Java or Bedrock/Education edition).
 Reply with ONE ```python code block and nothing else.
 
 Available functions (already defined, do not import them):
@@ -22,7 +22,7 @@ Coordinates are relative: (0, 0, 0) is at the player's feet level, a few blocks 
 y goes up, y = -1 is the ground, +z goes away from the player.
 Build in the area x from -30 to 30, z from 0 to 40, y from -1 to 60. Keep it under 50000 blocks.
 Use "air" to carve doors, windows and interiors.
-Materials are Bedrock block ids, e.g.: stone, cobblestone, stone_bricks, oak_planks, spruce_planks,
+Materials are block ids that are the same in Java and Bedrock, e.g.: stone, cobblestone, stone_bricks, oak_planks, spruce_planks,
 oak_log, glass, glass_pane, white_wool, red_wool, sandstone, quartz_block, gold_block, diamond_block,
 bricks, water, lava, torch, oak_leaves, grass_block, dirt, sand, air.
 

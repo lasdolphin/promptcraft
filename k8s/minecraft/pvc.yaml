@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: bedrock-data
+  name: minecraft-data
 spec:
   accessModes:
     - ReadWriteOnce
