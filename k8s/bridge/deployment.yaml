@@ -16,6 +16,8 @@ spec:
       labels:
         app: bridge
     spec:
+      # иначе Kubernetes добавит BRIDGE_PORT=tcp://... от сервиса bridge
+      enableServiceLinks: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
