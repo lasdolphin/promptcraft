@@ -43,6 +43,9 @@ spec:
               value: "10"
             - name: SPAWN_PROTECTION
               value: "0"
+            # иначе игроки с Bedrock (Geyser) не могут писать в чат: у них нет ключа подписи Java
+            - name: ENFORCE_SECURE_PROFILE
+              value: "false"
             # Друзей добавлять командой (сохраняется на диске):
             #   kubectl -n promptcraft exec deploy/minecraft -- rcon-cli whitelist add <ник Java>
             - name: ENABLE_WHITELIST
