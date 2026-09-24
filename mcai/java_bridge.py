@@ -254,7 +254,7 @@ async def follow_chat(game):
         try:
             lines = log_lines_from_command(cmd) if cmd else log_lines_from_kubernetes()
             # новый лог — возможно, сервер перезапустился: сверить списки и режим приёма
-            await safe(game.access.sync())
+            sync_task = asyncio.create_task(game.access.sync_with_retry())
             async for line in lines:
                 line = ANSI_RE.sub("", line).rstrip()
                 # вход/выход игроков — по порядку, чтобы одобрение не обогнало вход

@@ -12,6 +12,7 @@
 онлайн (иначе серверу неоткуда взять его UUID), поэтому одобрение офлайн-игрока откладывается
 до его следующего входа.
 """
+import asyncio
 import json
 import logging
 import os
@@ -104,7 +105,18 @@ class Access:
                 self.pending.setdefault(name, {"since": time.time()})["online"] = False
                 await self._notify_admins(f"{name} пытался зайти, но приём закрыт")
         elif SERVER_READY_RE.search(line):
-            await self.sync()
+            # RCON доступен не сразу: под ещё не Ready, у сервиса нет адреса — пробуем в фоне
+            self._retry_task = asyncio.create_task(self.sync_with_retry())
+
+    async def sync_with_retry(self, attempts=24, delay=5):
+        for attempt in range(attempts):
+            try:
+                await self.sync()
+                return
+            except Exception as e:
+                if attempt == attempts - 1:
+                    log.warning("access sync failed: %s", e)
+                await asyncio.sleep(delay)
 
     async def on_join(self, name):
         self.online.add(name)
