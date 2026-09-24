@@ -1,9 +1,12 @@
 """Запрос к модели через LiteLLM (OpenAI-совместимый API)."""
 import json
+import logging
 import os
 import re
 
 import httpx
+
+log = logging.getLogger("llm")
 
 API_DOC = """Available functions (already defined, do not import them):
   block(x, y, z, material)                          # one block
@@ -13,6 +16,7 @@ API_DOC = """Available functions (already defined, do not import them):
   cylinder(cx, y, cz, radius, height, material, hollow=False)  # vertical, base at y
   pyramid(cx, y, cz, size, material, hollow=False)  # size = half of base width
   line(x1, y1, z1, x2, y2, z2, material)
+  clear_terrain(x1, y1, z1, x2, y2, z2)             # remove only nature in the box, never builds (Java server)
   say(text)                                         # chat message
 Modules `math` and `random` are available. Nothing else can be imported. No files, no network.
 Use "air" to carve doors, windows and interiors.
@@ -60,6 +64,30 @@ def settings():
     }
 
 
+def thinking_mode():
+    """LLM_THINKING: off — не рассуждать (быстро, по умолчанию); final — рассуждать только когда пишется
+    финальный скрипт задачи; on — всегда. Qwen3 рассуждает долго (тысячи токенов), поэтому по умолчанию off."""
+    mode = os.environ.get("LLM_THINKING", "off")
+    return mode if mode in ("off", "final", "on") else "off"
+
+
+def _body(s, messages, temperature, fresh=False, think=False):
+    body = {"model": s["model"], "messages": messages, "temperature": temperature,
+            "max_tokens": 12000 if think else 4000,
+            "chat_template_kwargs": {"enable_thinking": think}}
+    if fresh:
+        body["cache"] = {"no-cache": True}   # ответ зависит от мира — кэш LiteLLM не подходит
+    return body
+
+
+def _message(resp):
+    choice = resp.json()["choices"][0]
+    if choice.get("finish_reason") == "length" and not choice["message"].get("tool_calls"):
+        log.warning("model hit max_tokens, usage %s", resp.json().get("usage"))
+        raise LLMError("Модель не уложилась в лимит ответа (слишком долго думала) — попробуй ещё раз или короче")
+    return choice["message"]
+
+
 async def generate_code(request, previous_code=None, feedback=None, system=SYSTEM_PROMPT):
     """Попросить модель написать скрипт.
     previous_code + feedback — попросить исправить ошибку или изменить прошлый скрипт."""
@@ -77,17 +105,21 @@ async def generate_code(request, previous_code=None, feedback=None, system=SYSTE
     headers = {"Authorization": f"Bearer {s['api_key']}"} if s["api_key"] else {}
     async with httpx.AsyncClient(timeout=s["timeout"]) as client:
         try:
-            resp = await client.post(f"{s['base_url']}/v1/chat/completions", headers=headers, json={
-                "model": s["model"],
-                "messages": messages,
-                "temperature": 0.5,
-                "max_tokens": 4000,
-            })
+            resp = await client.post(f"{s['base_url']}/v1/chat/completions", headers=headers,
+                                     json=_body(s, messages, 0.5, think=thinking_mode() == "on"))
             resp.raise_for_status()
         except httpx.HTTPError as e:
             raise LLMError(f"Модель недоступна: {e}") from e
-    content = resp.json()["choices"][0]["message"].get("content") or ""
-    return extract_code(content)
+    return extract_code(_message(resp).get("content") or "")
+
+
+async def _post(client, s, headers, body):
+    try:
+        resp = await client.post(f"{s['base_url']}/v1/chat/completions", headers=headers, json=body)
+        resp.raise_for_status()
+        return resp
+    except httpx.HTTPError as e:
+        raise LLMError(f"Модель недоступна: {e}") from e
 
 
 async def run_agent(system, request, tools, call_tool, max_steps=8, on_tool=None):
@@ -101,17 +133,17 @@ async def run_agent(system, request, tools, call_tool, max_steps=8, on_tool=None
             last = step == max_steps - 1
             if last:
                 messages.append({"role": "user", "content": "Enough looking around. Write the final script now."})
-            body = {"model": s["model"], "messages": messages, "temperature": 0.4, "max_tokens": 4000}
+            mode = thinking_mode()
+            body = _body(s, messages, 0.4, fresh=True, think=mode == "on" or (last and mode == "final"))
             if not last:
                 body["tools"] = tools
-            try:
-                resp = await client.post(f"{s['base_url']}/v1/chat/completions", headers=headers, json=body)
-                resp.raise_for_status()
-            except httpx.HTTPError as e:
-                raise LLMError(f"Модель недоступна: {e}") from e
-            msg = resp.json()["choices"][0]["message"]
+            msg = _message(await _post(client, s, headers, body))
             calls = msg.get("tool_calls") or []
             if not calls:
+                if mode == "final" and not last:
+                    # модель насмотрелась и готова писать — пусть напишет скрипт, подумав
+                    messages.append({"role": "user", "content": "Now write the final script."})
+                    msg = _message(await _post(client, s, headers, _body(s, messages, 0.4, fresh=True, think=True)))
                 return extract_code(msg.get("content") or "")
             messages.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": calls})
             for call in calls:

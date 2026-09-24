@@ -25,7 +25,8 @@ import httpx
 from mcai import admin_web, llm, sandbox, tasks
 from mcai.access import Access
 from mcai.builds import BuildStore
-from mcai.game import (SCRIPTS_DIR, Session, builds_folder, origin_from, safe, save_ai_script, seed_examples,
+from mcai.game import (SCRIPTS_DIR, Session, builds_folder, ops_volume, origin_from, safe, save_ai_script,
+                       seed_examples,
                        log_llm_settings)
 
 log = logging.getLogger("java")
@@ -146,6 +147,16 @@ class JavaGame(Session):
     def is_admin(self, player):
         return self.access.is_admin(player)
 
+    async def expand_ops(self, ops, origin, facing):
+        if not any(op[0] == "clear_terrain" for op in ops):
+            return ops
+        if not WORLD_URL:
+            return await super().expand_ops(ops, origin, facing)
+        reader = tasks.WorldReader(self.rcon.command, WORLD_URL)
+        ops, removed = await tasks.expand_clear_terrain(ops, tasks.Frame(origin, facing), reader, self.builds)
+        log.info("clear_terrain: %d natural blocks to remove", removed)
+        return ops
+
     async def task(self, player, text):
         if not WORLD_URL:
             await self.say("Задачи выключены: мост не видит мир (не задан WORLD_URL)")
@@ -200,8 +211,9 @@ class JavaGame(Session):
                 return
             request = f"задача для #{build['id']}: {text}" if build else text
             script = save_ai_script(player, request, code)
-            failed, count = await self.place(result["ops"], frame.origin, frame.facing)
-            b = self.builds.add(player, text, script, code, result["ops"], result["blocks"], frame.origin,
+            ops = await self.expand_ops(result["ops"], frame.origin, frame.facing)
+            failed, count = await self.place(ops, frame.origin, frame.facing)
+            b = self.builds.add(player, text, script, code, ops, ops_volume(ops), frame.origin,
                                 frame.facing, parent=build and build["id"])
             for m in result["messages"]:
                 await self.say(m)

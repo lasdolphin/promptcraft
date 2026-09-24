@@ -2,9 +2,11 @@
 
   GET /surface?x1=&z1=&x2=&z2=&ymin=&ymax=   — для каждой колонки: земля и что на самом верху
   GET /blocks?x1=&y1=&z1=&x2=&y2=&z2=        — какие блоки в объёме, по слоям
+  GET /volume?x1=&y1=&z1=&x2=&y2=&z2=        — все блоки объёма поимённо (палитра + индексы)
 
 Координаты — мировые. Перед запросом мост делает на сервере `save-all flush`, чтобы файлы были свежими.
 """
+import base64
 import glob
 import logging
 import os
@@ -101,11 +103,35 @@ async def blocks(request):
     return web.json_response({"layers": layers})
 
 
+MAX_CELLS = 64 * 64 * 64
+
+
+async def volume(request):
+    """Все блоки объёма: палитра + индексы (по 2 байта, порядок y, z, x) в base64."""
+    x1, y1, z1, x2, y2, z2 = ints(request, "x1", "y1", "z1", "x2", "y2", "z2")
+    x1, x2, y1, y2, z1, z2 = min(x1, x2), max(x1, x2), min(y1, y2), max(y1, y2), min(z1, z2), max(z1, z2)
+    if (x2 - x1 + 1) * (y2 - y1 + 1) * (z2 - z1 + 1) > MAX_CELLS:
+        raise web.HTTPBadRequest(text="volume too big")
+    world = World(region_dir())
+    palette, index, out = [], {}, bytearray()
+    for y in range(y1, y2 + 1):
+        for z in range(z1, z2 + 1):
+            for x in range(x1, x2 + 1):
+                name = world.block(x, y, z) or "unknown"
+                if name not in index:
+                    index[name] = len(palette)
+                    palette.append(name)
+                out += index[name].to_bytes(2, "little")
+    return web.json_response({"x1": x1, "y1": y1, "z1": z1, "x2": x2, "y2": y2, "z2": z2,
+                              "palette": palette, "data": base64.b64encode(bytes(out)).decode()})
+
+
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     app = web.Application()
     app.router.add_get("/surface", surface)
     app.router.add_get("/blocks", blocks)
+    app.router.add_get("/volume", volume)
     app.router.add_get("/health", lambda r: web.Response(text="ok"))
     web.run_app(app, port=int(os.environ.get("WORLD_PORT", "8090")), access_log=None)
 

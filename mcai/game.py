@@ -78,7 +78,7 @@ def ops_to_commands(ops, origin, facing, material=None, rename=lambda m: m):
             _, x, y, z, _ = op
             wx, wz = rotate(x, z, facing)
             commands.append(f"setblock {ox + wx} {oy + y} {oz + wz} {mat}")
-        else:
+        elif op[0] == "fill":
             _, x1, y1, z1, x2, y2, z2, _ = op
             ax, az = rotate(x1, z1, facing)
             bx, bz = rotate(x2, z2, facing)
@@ -87,6 +87,12 @@ def ops_to_commands(ops, origin, facing, material=None, rename=lambda m: m):
                 commands.append(f"fill {ox + b[0]} {oy + b[1]} {oz + b[2]} "
                                 f"{ox + b[3]} {oy + b[4]} {oz + b[5]} {mat}")
     return commands
+
+
+def ops_volume(ops):
+    """Сколько блоков ставят операции (воздух тоже считается)."""
+    return sum(1 if op[0] == "block" else (op[4] - op[1] + 1) * (op[5] - op[2] + 1) * (op[6] - op[3] + 1)
+               for op in ops if op[0] in ("block", "fill"))
 
 
 def origin_from(pos, yaw):
@@ -227,8 +233,9 @@ class Session:
         except RuntimeError as e:
             await self.say(str(e))
             return
-        failed, count = await self.place(result["ops"], origin, facing)
-        b = self.builds.add(player, request, script, code, result["ops"], result["blocks"], origin, facing)
+        ops = await self.expand_ops(result["ops"], origin, facing)
+        failed, count = await self.place(ops, origin, facing)
+        b = self.builds.add(player, request, script, code, ops, ops_volume(ops), origin, facing)
         for m in result["messages"]:
             await self.say(m)
         await self.say(f"Готово: #{b['id']} {b['name']}, {b['blocks']} блоков{self._failed_note(failed, count)}")
@@ -269,8 +276,9 @@ class Session:
             script = save_ai_script(player, f"{b['request']}. Change: {change}", code)
             origin, facing = tuple(b["origin"]), b["facing"]
             await self.place(list(reversed(b["ops"])), origin, facing, material="air")
-            failed, count = await self.place(result["ops"], origin, facing)
-            b = self.builds.update(b["id"], code=code, script=script, ops=result["ops"], blocks=result["blocks"],
+            ops = await self.expand_ops(result["ops"], origin, facing)
+            failed, count = await self.place(ops, origin, facing)
+            b = self.builds.update(b["id"], code=code, script=script, ops=ops, blocks=ops_volume(ops),
                                    request=f"{b['request']}. Change: {change}",
                                    history=b.get("history", []) + [change])
             for m in result["messages"]:
@@ -366,6 +374,12 @@ class Session:
         self.builds.delete(b["id"])
 
     # --- общее ---------------------------------------------------------------
+
+    async def expand_ops(self, ops, origin, facing):
+        """Операции, которые зависят от мира (clear_terrain), -> обычные. Здесь мир не виден — пропускаем."""
+        if any(op[0] == "clear_terrain" for op in ops):
+            await self.say("clear_terrain работает только на сервере Java — эту часть пропускаю")
+        return [op for op in ops if op[0] in ("block", "fill")]
 
     async def place(self, ops, origin, facing, material=None):
         commands = ops_to_commands(ops, origin, facing, material=material, rename=self.block_name)
