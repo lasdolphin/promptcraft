@@ -33,8 +33,12 @@ spec:
               value: Promptcraft
             - name: LEVEL
               value: promptcraft
+            # Все заходят в adventure (ничего не сломать), одобренным java-bridge ставит creative.
+            # Упал мост — все остаются в adventure. См. mcai/access.py
             - name: MODE
-              value: creative
+              value: adventure
+            - name: FORCE_GAMEMODE
+              value: "true"
             - name: DIFFICULTY
               value: peaceful
             - name: ONLINE_MODE
@@ -46,8 +50,8 @@ spec:
             # иначе игроки с Bedrock (Geyser) не могут писать в чат: у них нет ключа подписи Java
             - name: ENFORCE_SECURE_PROFILE
               value: "false"
-            # Друзей добавлять командой (сохраняется на диске):
-            #   kubectl -n promptcraft exec deploy/minecraft -- rcon-cli whitelist add <ник Java>
+            # Игроков одобряют в админке java-bridge (https://promptcraft-admin.antfarm.dev) или командой allow в чате.
+            # При старте whitelist включён; открыт ли приём, java-bridge решает сразу после запуска.
             - name: ENABLE_WHITELIST
               value: "true"
             - name: ENFORCE_WHITELIST

@@ -12,3 +12,17 @@ spec:
       port: 8765
       targetPort: 8765
       protocol: TCP
+---
+# Админка java-bridge — только внутри кластера, снаружи через k8s/bridge/admin-httproute.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: bridge-admin
+spec:
+  selector:
+    app: bridge
+  ports:
+    - name: admin
+      port: 8080
+      targetPort: 8080
+      protocol: TCP

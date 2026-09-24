@@ -78,11 +78,23 @@ spec:
                   key: LITELLM_API_KEY
             - name: RCON_HOST
               value: minecraft-rcon
+            # админы сервера (могут одобрять игроков командой allow в чате)
+            - name: ADMINS
+              value: .MattOmelett,.TrivialWig39433
+            # пароль админки https://promptcraft-admin.antfarm.dev
+            - name: ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: promptcraft-bridge-token
+                  key: password
             - name: RCON_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: promptcraft-bridge-token
                   key: password
+          ports:
+            - containerPort: 8080
+              name: admin
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

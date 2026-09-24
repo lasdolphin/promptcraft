@@ -1,16 +1,21 @@
-"""Общее для всех адаптеров: команды чата, запуск скриптов, превращение операций в команды игры.
+"""Общее для всех адаптеров: команды чата, постройки-проекты, превращение операций в команды игры.
 
-Адаптер (мост к конкретной игре) наследует Session и умеет три вещи:
+Адаптер (мост к конкретной игре) наследует Session и умеет:
   command(line)            — выполнить команду, вернуть (успех, сообщение)
   say(text)                — написать в чат
   player_position(player)  — где стоит игрок: ((x, y, z), поворот головы в градусах)
+  selector(player)         — как назвать игрока в команде (tp)
 
 Команды в чате игры:
-  ai <что построить>     — модель пишет скрипт и строит
-  ai+ <что изменить>     — модель меняет последний скрипт
-  run <имя>              — запустить свой скрипт scripts/<имя>.py
-  undo                   — убрать последнюю постройку (заменить воздухом)
-  help                   — подсказка
+  ai <что построить>           — модель пишет скрипт и строит; постройка получает номер: #7
+  ai+ [#7|имя] <что изменить>  — доработать постройку (без номера — свою последнюю)
+  run <скрипт>                 — запустить свой скрипт scripts/<скрипт>.py
+  builds [all]                 — таблица построек
+  name #7 <новое имя>          — переименовать
+  tp #7                        — перенестись к постройке
+  delete #7                    — удалить (спросит подтверждение)
+  undo                         — удалить свою последнюю постройку (тоже с подтверждением)
+  help                         — подсказка
 """
 import asyncio
 import logging
@@ -20,6 +25,7 @@ import shutil
 import time
 
 from mcai import llm, sandbox
+from mcai.builds import BuildError, BuildStore, line
 
 log = logging.getLogger("game")
 
@@ -28,13 +34,21 @@ SCRIPTS_DIR = os.environ.get("SCRIPTS_DIR", EXAMPLES_DIR)
 MAX_FILL_VOLUME = 32768     # ограничение команды /fill
 FORWARD_OFFSET = 3          # на сколько блоков перед игроком начинать постройку
 NAME_RE = re.compile(r"^[A-Za-z0-9_\-/]+$")
+CONFIRM_SECONDS = 60
+YES = {"да", "yes", "y", "д", "ага"}
 
 HELP = [
     "ai <что построить> — например: ai замок с четырьмя башнями",
-    "ai+ <что изменить> — например: ai+ сделай башни выше",
-    "run <имя> — запустить свой скрипт, например: run tower",
-    "undo — убрать последнюю постройку",
+    "ai+ #7 <что изменить> — доработать постройку #7 (без номера — последнюю)",
+    "run <скрипт> — запустить свой скрипт, например: run tower",
+    "builds — список построек, name #7 <имя> — переименовать",
+    "tp #7 — перенестись к постройке, delete #7 — удалить",
 ]
+
+
+def builds_folder(adapter):
+    """Постройки каждой игры отдельно: у Java-сервера и мира Education разные миры."""
+    return os.path.join(SCRIPTS_DIR, ".builds", adapter)
 
 
 # --- превращение операций в команды игры -------------------------------------
@@ -88,10 +102,10 @@ class Session:
     # сколько команд отправлять в игру одновременно
     parallel = 50
 
-    def __init__(self):
-        self.last_build = {}   # игрок -> (ops, origin, facing)
-        self.last_code = {}    # игрок -> (запрос, код)
+    def __init__(self, store):
+        self.builds = store
         self.busy = set()
+        self.confirm = {}      # игрок -> (что удалить, до какого времени ждать ответа)
 
     async def command(self, line):
         raise NotImplementedError
@@ -102,9 +116,16 @@ class Session:
     async def player_position(self, player):
         raise NotImplementedError
 
+    def selector(self, player):
+        return player
+
     def block_name(self, material):
         """Имя блока для этой версии игры (переопределяется в адаптере)."""
         return material
+
+    def is_admin(self, player):
+        """Админ может менять и удалять чужие постройки. В своём мире (Education) — все."""
+        return True
 
     async def run_commands(self, commands):
         slots = asyncio.Semaphore(self.parallel)
@@ -124,48 +145,61 @@ class Session:
     async def on_chat(self, player, text):
         text = text.strip()
         low = text.lower()
+        word, _, rest = text.partition(" ")
+        word, rest = word.lower(), rest.strip()
+        if player in self.confirm and await self.answer_confirm(player, low):
+            return
         if low in ("help", "помощь"):
             await self.say("\n".join(HELP))
-        elif low == "undo":
-            await self.undo(player)
-        elif low.startswith("run "):
-            await self.run_script(player, text[4:].strip())
-        elif low.startswith("ai+ "):
-            await self.ai(player, text[4:].strip(), modify=True)
-        elif low.startswith("ai "):
-            await self.ai(player, text[3:].strip())
+        elif word == "undo":
+            await self.ask_delete(player, self.builds.last(owner=player))
+        elif word == "delete":
+            await self.ask_delete(player, self._find_or_tell(rest) if rest else None, rest)
+        elif word in ("builds", "постройки"):
+            await self.list_builds(all_=rest.lower() == "all")
+        elif word in ("name", "rename"):
+            await self.rename(player, rest)
+        elif word == "tp":
+            await self.teleport(player, rest)
+        elif word == "run":
+            await self.run_script(player, rest)
+        elif word == "ai+":
+            await self.ai_modify(player, rest)
+        elif word == "ai":
+            await self.ai(player, rest)
 
-    async def ai(self, player, request, modify=False):
-        if player in self.busy:
-            await self.say(f"{player}, подожди, я ещё строю прошлое")
+    def _find_or_tell(self, ref):
+        return self.builds.find(ref.split()[0]) if ref else None
+
+    async def _get_editable(self, player, ref, action):
+        b = self.builds.find(ref) if ref else self.builds.last(owner=player)
+        if not b:
+            await self.say(f"Не нашёл постройку {ref}. Список: builds" if ref else "У тебя пока нет построек")
+            return None
+        if b["owner"] != player and not self.is_admin(player):
+            await self.say(f"#{b['id']} построил {b['owner']} — {action} может только он или админ")
+            return None
+        return b
+
+    # --- новые постройки -----------------------------------------------------
+
+    async def ai(self, player, request):
+        if not request:
+            await self.say("Напиши, что построить: ai домик с окнами")
             return
-        self.busy.add(player)
-        try:
-            previous = self.last_code.get(player) if modify else None
-            if modify and not previous:
-                await self.say("Сначала попроси что-нибудь построить: ai <что построить>")
+        async with self._one_at_a_time(player) as ok:
+            if not ok:
                 return
             await self.say(f"Думаю над: {request} ...")
             t = time.time()
-            if previous:
-                prompt = f"{previous[0]}. Change: {request}"
-                code = await llm.generate_code(previous[0], previous[1], f"Change the script: {request}")
-            else:
-                prompt = request
-                code = await llm.generate_code(prompt)
-            result = await asyncio.to_thread(sandbox.run, code)
-            if result["error"]:
-                log.info("AI code failed (%s), asking to fix", result["error"])
-                code = await llm.generate_code(prompt, code, f"The script failed with: {result['error']}\nFix it.")
-                result = await asyncio.to_thread(sandbox.run, code)
-            name = save_ai_script(player, prompt, code)
-            self.last_code[player] = (prompt, code)
-            await self.say(f"Код готов за {time.time() - t:.0f} с, он лежит в файле {name}.py")
-            await self.build(player, result, name)
-        except llm.LLMError as e:
-            await self.say(str(e))
-        finally:
-            self.busy.discard(player)
+            try:
+                code, result = await self._generate(request)
+            except llm.LLMError as e:
+                await self.say(str(e))
+                return
+            script = save_ai_script(player, request, code)
+            await self.say(f"Код готов за {time.time() - t:.0f} с, он лежит в файле {script}.py")
+            await self.build_new(player, request, script, code, result)
 
     async def run_script(self, player, name):
         if not NAME_RE.match(name) or ".." in name:
@@ -176,34 +210,178 @@ class Session:
             await self.say(f"Нет скрипта {name}.py")
             return
         with open(path, encoding="utf-8") as f:
-            result = await asyncio.to_thread(sandbox.run, f.read())
-        await self.build(player, result, name)
+            code = f.read()
+        result = await asyncio.to_thread(sandbox.run, code)
+        await self.build_new(player, name, name, code, result)
 
-    async def build(self, player, result, name):
+    async def build_new(self, player, request, script, code, result):
         if result["error"]:
-            await self.say(f"Ошибка в {name}.py: {result['error']}")
+            await self.say(f"Ошибка в {script}.py: {result['error']}")
             return
         try:
             origin, facing = origin_from(*await self.player_position(player))
         except RuntimeError as e:
             await self.say(str(e))
             return
-        commands = ops_to_commands(result["ops"], origin, facing, rename=self.block_name)
-        failed = await self.run_commands(commands)
-        self.last_build[player] = (result["ops"], origin, facing)
+        failed, count = await self.place(result["ops"], origin, facing)
+        b = self.builds.add(player, request, script, code, result["ops"], result["blocks"], origin, facing)
         for m in result["messages"]:
             await self.say(m)
-        note = f", не получилось: {len(failed)}" if failed else ""
-        await self.say(f"Поставлено {result['blocks']} блоков ({len(commands)} команд{note})")
+        await self.say(f"Готово: #{b['id']} {b['name']}, {b['blocks']} блоков{self._failed_note(failed, count)}")
+        await self.say(f"Доработать: ai+ #{b['id']} <что изменить>, переименовать: name #{b['id']} <имя>")
 
-    async def undo(self, player):
-        last = self.last_build.pop(player, None)
-        if not last:
-            await self.say("Нечего отменять")
+    # --- доработка -----------------------------------------------------------
+
+    async def ai_modify(self, player, text):
+        first, _, rest = text.partition(" ")
+        target = self.builds.find(first) if first else None
+        if target:
+            ref, change = first, rest.strip()
+        elif first.startswith("#"):
+            await self.say(f"Не нашёл постройку {first}. Список: builds")
             return
-        ops, origin, facing = last
-        await self.run_commands(ops_to_commands(list(reversed(ops)), origin, facing, material="air"))
-        await self.say("Убрал последнюю постройку")
+        else:
+            ref, change = None, text
+        if not change:
+            await self.say("Напиши, что изменить: ai+ #7 сделай выше")
+            return
+        b = await self._get_editable(player, ref, "менять")
+        if not b:
+            return
+        async with self._one_at_a_time(player) as ok:
+            if not ok:
+                return
+            await self.say(f"Меняю #{b['id']} {b['name']}: {change} ...")
+            t = time.time()
+            try:
+                code, result = await self._generate(f"{b['request']}. Change: {change}",
+                                                    previous=(b["request"], b["code"]), change=change)
+            except llm.LLMError as e:
+                await self.say(str(e))
+                return
+            if result["error"]:
+                await self.say(f"Не получилось: {result['error']}")
+                return
+            script = save_ai_script(player, f"{b['request']}. Change: {change}", code)
+            origin, facing = tuple(b["origin"]), b["facing"]
+            await self.place(list(reversed(b["ops"])), origin, facing, material="air")
+            failed, count = await self.place(result["ops"], origin, facing)
+            b = self.builds.update(b["id"], code=code, script=script, ops=result["ops"], blocks=result["blocks"],
+                                   request=f"{b['request']}. Change: {change}",
+                                   history=b.get("history", []) + [change])
+            for m in result["messages"]:
+                await self.say(m)
+            await self.say(f"#{b['id']} {b['name']} обновлена за {time.time() - t:.0f} с: "
+                           f"{b['blocks']} блоков{self._failed_note(failed, count)}. Код: {script}.py")
+
+    async def _generate(self, prompt, previous=None, change=None):
+        """Модель пишет код; если он падает — один раз просим исправить."""
+        if previous:
+            code = await llm.generate_code(previous[0], previous[1], f"Change the script: {change}")
+        else:
+            code = await llm.generate_code(prompt)
+        result = await asyncio.to_thread(sandbox.run, code)
+        if result["error"]:
+            log.info("AI code failed (%s), asking to fix", result["error"])
+            code = await llm.generate_code(prompt, code, f"The script failed with: {result['error']}\nFix it.")
+            result = await asyncio.to_thread(sandbox.run, code)
+        return code, result
+
+    # --- таблица, имя, телепорт, удаление ------------------------------------
+
+    async def list_builds(self, all_=False):
+        items = self.builds.listing(None if all_ else 10)
+        if not items:
+            await self.say("Построек пока нет. Попробуй: ai домик")
+            return
+        total = len(self.builds.builds)
+        head = f"Постройки ({total}):" if all_ or total <= 10 else f"Последние 10 из {total} (все: builds all):"
+        await self.say("\n".join([head] + [line(b) for b in items]))
+
+    async def rename(self, player, text):
+        ref, _, new = text.partition(" ")
+        if not ref or not new.strip():
+            await self.say("Напиши: name #7 новое-имя")
+            return
+        b = await self._get_editable(player, ref, "переименовать")
+        if not b:
+            return
+        try:
+            b = self.builds.rename(b["id"], new.strip())
+        except BuildError as e:
+            await self.say(str(e))
+            return
+        await self.say(f"Теперь #{b['id']} называется {b['name']}")
+
+    async def teleport(self, player, ref):
+        b = self.builds.find(ref) if ref else None
+        if not b:
+            await self.say("Напиши номер или имя: tp #7 (список: builds)")
+            return
+        # туда, где стоял автор, лицом к постройке
+        (ox, oy, oz), facing = b["origin"], b["facing"]
+        bx, bz = rotate(0, FORWARD_OFFSET, facing)
+        ok, msg = await self.command(f"tp {self.selector(player)} {ox - bx + 0.5} {oy} {oz - bz + 0.5} "
+                                     f"{facing * 90} 20")
+        if not ok:
+            await self.say(f"Не получилось перенести: {msg}")
+
+    async def ask_delete(self, player, b, ref=""):
+        if not b:
+            await self.say(f"Не нашёл постройку {ref}. Список: builds" if ref else "Нечего удалять")
+            return
+        if b["owner"] != player and not self.is_admin(player):
+            await self.say(f"#{b['id']} построил {b['owner']} — удалить может только он или админ")
+            return
+        self.confirm[player] = (b["id"], time.time() + CONFIRM_SECONDS)
+        await self.say(f"{player}, удалить #{b['id']} {b['name']} ({b['blocks']} блоков)? "
+                       f"Напиши: да (или что угодно другое — отмена)")
+
+    async def answer_confirm(self, player, answer):
+        """Ответ на «удалить?». True — сообщение было ответом."""
+        build_id, until = self.confirm.pop(player)
+        if time.time() > until:
+            return False
+        if answer not in YES:
+            await self.say("Удаление отменено")
+            return True
+        b = self.builds.builds.get(build_id)
+        if b:
+            await self.remove_build(b)
+            await self.say(f"Удалил #{b['id']} {b['name']}")
+        return True
+
+    async def remove_build(self, b):
+        await self.place(list(reversed(b["ops"])), tuple(b["origin"]), b["facing"], material="air")
+        self.builds.delete(b["id"])
+
+    # --- общее ---------------------------------------------------------------
+
+    async def place(self, ops, origin, facing, material=None):
+        commands = ops_to_commands(ops, origin, facing, material=material, rename=self.block_name)
+        return await self.run_commands(commands), len(commands)
+
+    @staticmethod
+    def _failed_note(failed, count):
+        return f" (не получилось {len(failed)} из {count} команд)" if failed else ""
+
+    def _one_at_a_time(self, player):
+        session = self
+
+        class Guard:
+            async def __aenter__(self):
+                if player in session.busy:
+                    await session.say(f"{player}, подожди, я ещё строю прошлое")
+                    return False
+                session.busy.add(player)
+                self.entered = True
+                return True
+
+            async def __aexit__(self, *exc):
+                if getattr(self, "entered", False):
+                    session.busy.discard(player)
+
+        return Guard()
 
 
 async def safe(coro):

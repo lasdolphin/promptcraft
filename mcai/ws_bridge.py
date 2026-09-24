@@ -8,18 +8,23 @@ import uuid
 
 import websockets
 
-from mcai.game import Session, safe, seed_examples, log_llm_settings
+from mcai.builds import BuildStore
+from mcai.game import Session, builds_folder, safe, seed_examples, log_llm_settings
 
 log = logging.getLogger("bridge")
 
 TOKEN = os.environ.get("BRIDGE_TOKEN", "")
+STORE = None   # постройки общие для всех подключений к мосту
 
 
 class Game(Session):
     def __init__(self, ws):
-        super().__init__()
+        super().__init__(STORE)
         self.ws = ws
         self.pending = {}
+
+    def selector(self, player):
+        return '"' + player.replace('"', "") + '"'
 
     async def send(self, purpose, body, wait=True):
         request_id = str(uuid.uuid4())
@@ -94,8 +99,10 @@ async def handle(ws):
 
 async def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+    global STORE
     port = int(os.environ.get("BRIDGE_PORT", "8765"))
     seed_examples()
+    STORE = BuildStore(builds_folder("education"))
     log_llm_settings()
     async with websockets.serve(handle, "0.0.0.0", port, max_size=2**22):
         log.info("Listening on :%d, in the game type: /connect localhost:%d%s",
