@@ -4,6 +4,7 @@ namespace: promptcraft
 
 resources:
   - namespace.yaml
+  - minecraft/geyser-config.yaml
   - minecraft/pvc.yaml
   - minecraft/deployment.yaml
   - minecraft/service.yaml

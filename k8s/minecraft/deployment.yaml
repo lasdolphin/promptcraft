@@ -63,9 +63,24 @@ spec:
               value: 3G
             - name: USE_AIKAR_FLAGS
               value: "true"
+            # Geyser пускает игроков с Bedrock (телефоны, планшеты, Windows),
+            # Floodgate — без Java-аккаунта. Их ники в игре начинаются с точки: .Steve
+            - name: PLUGINS
+              value: |
+                https://download.geysermc.org/v2/projects/geyser/versions/latest/builds/latest/downloads/spigot
+                https://download.geysermc.org/v2/projects/floodgate/versions/latest/builds/latest/downloads/spigot
           ports:
             - containerPort: 25565
               name: minecraft
+            - containerPort: 19132
+              protocol: UDP
+              name: bedrock-raknet
+            - containerPort: 19132
+              protocol: TCP
+              name: bedrock-signal
+            - containerPort: 19133
+              protocol: UDP
+              name: bedrock-webrtc
             - containerPort: 25575
               name: rcon
           readinessProbe:
@@ -82,7 +97,14 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+            # образ копирует /plugins в /data/plugins при старте
+            - name: geyser-config
+              mountPath: /plugins/Geyser-Spigot/config.yml
+              subPath: config.yml
       volumes:
+        - name: geyser-config
+          configMap:
+            name: geyser-config
         - name: data
           persistentVolumeClaim:
             claimName: minecraft-data

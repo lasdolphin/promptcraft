@@ -1,0 +1,20 @@
+# Настройки Geyser (Bedrock-игроки на Java-сервере). Только то, что отличается от умолчаний:
+# остальное Geyser допишет сам при старте.
+#   RakNet (старый способ, UDP 19132) и NetherNet (новый: сигналинг TCP 19132 + UDP 19133)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: geyser-config
+data:
+  config.yml: |
+    bedrock:
+      port: 19132
+      webrtc-port: 19133
+      transport: both
+    java:
+      auth-type: floodgate
+    motd:
+      primary-motd: Promptcraft
+      secondary-motd: Promptcraft
+    gameplay:
+      server-name: Promptcraft

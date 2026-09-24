@@ -13,6 +13,19 @@ spec:
       port: 25565
       targetPort: 25565
       protocol: TCP
+    # Bedrock через Geyser (k8s/minecraft/geyser-config.yaml)
+    - name: bedrock-raknet
+      port: 19132
+      targetPort: 19132
+      protocol: UDP
+    - name: bedrock-signal
+      port: 19132
+      targetPort: 19132
+      protocol: TCP
+    - name: bedrock-webrtc
+      port: 19133
+      targetPort: 19133
+      protocol: UDP
 ---
 # RCON — только внутри кластера, для java-bridge
 apiVersion: v1

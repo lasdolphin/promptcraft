@@ -27,7 +27,8 @@ RCON_PORT = int(os.environ.get("RCON_PORT", "25575"))
 RCON_PASSWORD = os.environ.get("RCON_PASSWORD", "")
 RCON_CONNECTIONS = 4
 
-CHAT_RE = re.compile(r"\]: (?:\[Not Secure\] )?<([A-Za-z0-9_]{1,16})> (.*)$")
+# Игроки с Bedrock (через Geyser/Floodgate) пишут с точкой перед ником: <.Steve>
+CHAT_RE = re.compile(r"\]: (?:\[Not Secure\] )?<(\.?[A-Za-z0-9_]{1,16})> (.*)$")
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 NUMBER_RE = re.compile(r"-?\d+(?:\.\d+)?(?:E-?\d+)?")
 

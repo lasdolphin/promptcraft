@@ -58,7 +58,7 @@ RCON_PASSWORD=secret MC_LOG_CMD="docker logs -f --since 0s mc" .venv/bin/python 
 
 | Что | Зачем |
 |---|---|
-| `minecraft/` | сервер Minecraft Java (Paper, творческий режим, whitelist), TCP 25565 через MetalLB |
+| `minecraft/` | сервер Minecraft Java (Paper, творческий режим, whitelist), TCP 25565 через MetalLB. С Geyser и Floodgate: игроки с Bedrock заходят на тот же адрес, порт 19132 (UDP+TCP) и 19133 (UDP) |
 | `playit/` | агент playit.gg — друзья заходят снаружи |
 | `bridge/` | под моста: `bridge` — для `/connect` из Education (наружу через Cloudflare Tunnel), `java-bridge` — для сервера Java (RCON + чат из лога пода `minecraft`) |
 
@@ -70,8 +70,14 @@ RCON_PASSWORD=secret MC_LOG_CMD="docker logs -f --since 0s mc" .venv/bin/python 
 1. После первой сборки сделать пакет `promptcraft-bridge` публичным (GitHub → Packages → Settings).
 2. `kubectl apply -f k8s/argocd-app.yaml`
 3. В cosmo-fleet добавить правило cloudflared для `promptcraft.antfarm.dev`.
-4. В панели playit.gg: туннель Minecraft Java → адрес сервиса `minecraft` (`kubectl -n promptcraft get svc minecraft`), порт 25565.
+4. В панели playit.gg два туннеля на адрес сервиса `minecraft` (`kubectl -n promptcraft get svc minecraft`):
+   Minecraft Java → порт 25565, Minecraft Bedrock (UDP) → порт 19132.
 
-Добавить друга (ник в Minecraft Java):
+Добавить друга с Java (ник в Minecraft Java):
 `kubectl -n promptcraft exec deploy/minecraft -- rcon-cli whitelist add <ник>`.
+
+Добавить друга с Bedrock (гейммтег Xbox): сначала он один раз пробует зайти (сервер его не пустит,
+зато Floodgate запомнит гейммтег), потом
+`kubectl -n promptcraft exec deploy/minecraft -- rcon-cli fwhitelist add <гейммтег>`.
+В игре его ник будет с точкой: `.Гейммтег`. Minecraft Education на сервер зайти не может — для него мост `/connect`.
 Консоль сервера: `kubectl -n promptcraft exec deploy/minecraft -- rcon-cli <команда>`.
