@@ -7,6 +7,9 @@
 Откуда брать лог (переменная MC_LOG_CMD):
 - не задана — из Kubernetes API: лог пода с меткой MC_POD_SELECTOR (так работает в кластере);
 - задана — из вывода команды, например: MC_LOG_CMD="docker logs -f --since 0s mc".
+
+Кто может строить — mcai/access.py (вход с одобрением), админка — mcai/admin_web.py.
+Команды админов в чате: allow <ник>, deny <ник>, players, open, close.
 """
 import asyncio
 import datetime
@@ -18,7 +21,9 @@ import struct
 
 import httpx
 
-from mcai.game import Session, safe, seed_examples, log_llm_settings
+from mcai import admin_web
+from mcai.access import Access
+from mcai.game import SCRIPTS_DIR, Session, safe, seed_examples, log_llm_settings
 
 log = logging.getLogger("java")
 
@@ -26,6 +31,11 @@ RCON_HOST = os.environ.get("RCON_HOST", "localhost")
 RCON_PORT = int(os.environ.get("RCON_PORT", "25575"))
 RCON_PASSWORD = os.environ.get("RCON_PASSWORD", "")
 RCON_CONNECTIONS = 4
+# ники админов через запятую (игроки с Bedrock — с точкой: .Steve)
+ADMINS = [a.strip() for a in os.environ.get("ADMINS", "").split(",") if a.strip()]
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
+ADMIN_PORT = int(os.environ.get("ADMIN_PORT", "8080"))
+ACCESS_FILE = os.environ.get("ACCESS_FILE", os.path.join(SCRIPTS_DIR, ".access.json"))
 
 # Игроки с Bedrock (через Geyser/Floodgate) пишут с точкой перед ником: <.Steve>
 CHAT_RE = re.compile(r"\]: (?:\[Not Secure\] )?<(\.?[A-Za-z0-9_]{1,16})> (.*)$")
@@ -126,6 +136,40 @@ class JavaGame(Session):
     def __init__(self, rcon):
         super().__init__()
         self.rcon = rcon
+        self.access = Access(self.rcon.command, self.tell, ADMINS, ACCESS_FILE)
+
+    async def on_chat(self, player, text):
+        words = text.strip().split()
+        if not words:
+            return
+        cmd = words[0].lower()
+        if cmd in ("allow", "deny", "players", "open", "close") and self.access.is_admin(player):
+            await self.admin_command(player, cmd, words[1:])
+        elif self.access.is_approved(player):
+            await super().on_chat(player, text)
+        elif cmd in ("ai", "ai+", "run", "undo", "help"):
+            await self.tell(player, "Ты пока гость: команды заработают, когда админ тебя одобрит.")
+
+    async def admin_command(self, player, cmd, args):
+        a = self.access
+        if cmd in ("allow", "deny"):
+            if not args:
+                await self.tell(player, f"Напиши: {cmd} <ник>")
+                return
+            name = a.resolve(args[0]) or args[0]
+            await self.tell(player, await (a.approve(name) if cmd == "allow" else a.remove(name)))
+        elif cmd in ("open", "close"):
+            await self.tell(player, await a.set_open(cmd == "open"))
+        else:
+            s = a.state()
+            waiting = ", ".join(p["name"] for p in s["pending"]) or "никто"
+            await self.tell(player, f"Приём {'открыт' if s['open'] else 'закрыт'}. "
+                                    f"Одобрены: {', '.join(s['approved']) or 'никто'}. Ждут: {waiting}")
+
+    async def tell(self, player, text):
+        for line in str(text).splitlines():
+            message = json.dumps({"text": f"[AI] {line}", "color": "yellow"})
+            await self.command(f"tellraw {player} {message}")
 
     async def command(self, line):
         try:
@@ -205,7 +249,12 @@ async def follow_chat(game):
     while True:
         try:
             lines = log_lines_from_command(cmd) if cmd else log_lines_from_kubernetes()
+            # новый лог — возможно, сервер перезапустился: сверить списки и режим приёма
+            await safe(game.access.sync())
             async for line in lines:
+                line = ANSI_RE.sub("", line).rstrip()
+                # вход/выход игроков — по порядку, чтобы одобрение не обогнало вход
+                await safe(game.access.on_log_line(line))
                 chat = parse_chat(line)
                 if chat:
                     task = asyncio.create_task(safe(game.on_chat(*chat)))
@@ -221,7 +270,8 @@ async def main():
     seed_examples()
     log_llm_settings()
     game = JavaGame(RconPool(RCON_CONNECTIONS))
-    log.info("RCON %s:%d, waiting for chat commands", RCON_HOST, RCON_PORT)
+    await admin_web.start(game.access, ADMIN_TOKEN, ADMIN_PORT)
+    log.info("RCON %s:%d, admins %s, waiting for chat commands", RCON_HOST, RCON_PORT, ADMINS or "-")
     await follow_chat(game)
 
 

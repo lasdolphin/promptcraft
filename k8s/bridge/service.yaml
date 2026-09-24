@@ -12,3 +12,8 @@ spec:
       port: 8765
       targetPort: 8765
       protocol: TCP
+    # админка сервера Java (только из домашней сети): http://<ip>:8080
+    - name: admin
+      port: 8080
+      targetPort: 8080
+      protocol: TCP

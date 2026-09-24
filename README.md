@@ -73,11 +73,25 @@ RCON_PASSWORD=secret MC_LOG_CMD="docker logs -f --since 0s mc" .venv/bin/python 
 4. В панели playit.gg два туннеля на адрес сервиса `minecraft` (`kubectl -n promptcraft get svc minecraft`):
    Minecraft Java → порт 25565, Minecraft Bedrock (UDP) → порт 19132.
 
-Добавить друга с Java (ник в Minecraft Java):
-`kubectl -n promptcraft exec deploy/minecraft -- rcon-cli whitelist add <ник>`.
+### Кто может играть: вход с одобрением
 
-Добавить друга с Bedrock (гейммтег Xbox): сначала он один раз пробует зайти (сервер его не пустит,
-зато Floodgate запомнит гейммтег), потом
-`kubectl -n promptcraft exec deploy/minecraft -- rcon-cli fwhitelist add <гейммтег>`.
-В игре его ник будет с точкой: `.Гейммтег`. Minecraft Education на сервер зайти не может — для него мост `/connect`.
+Админка: http://192.168.2.244:8080 (только из домашней сети), пароль — `promptcraft-bridge-token`.
+Там видно, кто ждёт одобрения и кто одобрен, есть кнопки «Одобрить», «Удалить» и переключатель
+«Приём новых игроков».
+
+Как добавить друга:
+1. В админке открыть приём (или написать в чате `open`).
+2. Друг заходит на сервер. Он гость: режим adventure, строить и запускать команды нельзя.
+   Админам в игре приходит сообщение.
+3. Одобрить: кнопка в админке или `allow <ник>` в чате. Друг сразу получает creative.
+4. Закрыть приём (`close`) — дальше заходят только одобренные.
+
+Команды админов в чате: `allow <ник>`, `deny <ник>` (убрать и выкинуть), `players`, `open`, `close`.
+Админы — переменная `ADMINS` в `k8s/bridge/deployment.yaml`. Игроки с Bedrock в игре — с точкой: `.Гейммтег`.
+
+Одобренные — это обычный whitelist сервера. Bedrock-игрока сервер может добавить в него, только
+пока тот онлайн (иначе неоткуда взять его UUID), поэтому и нужен вход гостем.
+Если мост не работает, все остаются в adventure — сломать ничего нельзя.
+
+Minecraft Education на сервер зайти не может — для него мост `/connect`.
 Консоль сервера: `kubectl -n promptcraft exec deploy/minecraft -- rcon-cli <команда>`.
