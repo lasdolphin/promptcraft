@@ -62,13 +62,14 @@ RCON_PASSWORD=secret MC_LOG_CMD="docker logs -f --since 0s mc" .venv/bin/python 
 ## Деплой в кластер
 
 Образ моста собирает GitHub Actions при push в `main`: `ghcr.io/lasdolphin/promptcraft-bridge`.
-Манифесты в `k8s/`, их синхронизирует ArgoCD (namespace `promptcraft`):
+Манифесты в `k8s/`, их синхронизирует ArgoCD (namespace `promptcraft`). Само приложение ArgoCD
+описано в cosmo-fleet: `apps/promptcraft/promptcraft-app.yaml`.
 
 | Что | Зачем |
 |---|---|
-| `minecraft/` | сервер Minecraft Java (Paper, творческий режим, whitelist), TCP 25565 через MetalLB. С Geyser и Floodgate: игроки с Bedrock заходят на тот же адрес, порт 19132 (UDP+TCP) и 19133 (UDP) |
+| `minecraft/` | сервер Minecraft Java (Paper, вход с одобрением: гости в adventure, одобренные в creative), TCP 25565 через MetalLB. С Geyser и Floodgate: игроки с Bedrock заходят на тот же адрес, порт 19132 (UDP+TCP) и 19133 (UDP) |
 | `playit/` | агент playit.gg — друзья заходят снаружи |
-| `bridge/` | под моста: `bridge` — для `/connect` из Education (наружу через Cloudflare Tunnel), `java-bridge` — для сервера Java (RCON + чат из лога пода `minecraft`) |
+| `bridge/` | под моста: `bridge` — для `/connect` из Education (наружу через Cloudflare Tunnel), `java-bridge` — для сервера Java (RCON + чат из лога пода `minecraft`) и админка https://promptcraft-admin.antfarm.dev (локальный gateway) |
 
 Секреты берутся из 1Password (vault `antfarm.dev`): `playit-agent` (поле `password`),
 `minecraft-litellm` (поле `LITELLM_API_KEY`), `promptcraft-bridge-token` (поле `password`;
@@ -76,7 +77,7 @@ RCON_PASSWORD=secret MC_LOG_CMD="docker logs -f --since 0s mc" .venv/bin/python 
 
 Один раз:
 1. После первой сборки сделать пакет `promptcraft-bridge` публичным (GitHub → Packages → Settings).
-2. `kubectl apply -f k8s/argocd-app.yaml`
+2. В cosmo-fleet: `kubectl apply -f apps/promptcraft/promptcraft-app.yaml`
 3. В cosmo-fleet добавить правило cloudflared для `promptcraft.antfarm.dev`.
 4. В панели playit.gg два туннеля на адрес сервиса `minecraft` (`kubectl -n promptcraft get svc minecraft`):
    Minecraft Java → порт 25565, Minecraft Bedrock (UDP) → порт 19132.
