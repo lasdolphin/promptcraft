@@ -147,6 +147,14 @@ class Builder:
                 seen.add(p)
                 self.block(*p, m)
 
+    def clear_terrain(self, x1, y1, z1, x2, y2, z2):
+        """Убрать природу (землю, камень, траву, деревья, воду) в объёме, не трогая постройки.
+        Какие именно блоки убрать, мост решает сам, глядя на мир (только сервер Java)."""
+        x1, x2 = sorted((self._coord(x1, "x"), self._coord(x2, "x")))
+        y1, y2 = sorted((self._coord(y1, "y"), self._coord(y2, "y")))
+        z1, z2 = sorted((self._coord(z1, "z"), self._coord(z2, "z")))
+        self._add(["clear_terrain", x1, y1, z1, x2, y2, z2], (x2 - x1 + 1) * (y2 - y1 + 1) * (z2 - z1 + 1))
+
     def say(self, text):
         """Написать сообщение в чат игры."""
         self.messages.append(str(text)[:200])
@@ -157,7 +165,7 @@ class Builder:
 
     def functions(self):
         return {name: getattr(self, name) for name in
-                ("block", "fill", "walls", "sphere", "cylinder", "pyramid", "line", "say")}
+                ("block", "fill", "walls", "sphere", "cylinder", "pyramid", "line", "clear_terrain", "say")}
 
 
 def _runs(xs):
