@@ -78,6 +78,9 @@ spec:
                   key: LITELLM_API_KEY
             - name: RCON_HOST
               value: minecraft-rcon
+            # откуда ИИ смотрит на мир в задачах (сайдкар world-reader в поде minecraft)
+            - name: WORLD_URL
+              value: http://minecraft-world:8090
             # админы сервера (могут одобрять игроков командой allow в чате)
             - name: ADMINS
               value: .MattOmelett,.TrivialWig39433

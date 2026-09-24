@@ -9,6 +9,7 @@
 Команды в чате игры:
   ai <что построить>           — модель пишет скрипт и строит; постройка получает номер: #7
   ai+ [#7|имя] <что изменить>  — доработать постройку (без номера — свою последнюю)
+  task [#7] <задача>           — ИИ смотрит на местность вокруг постройки и делает (mcai/tasks.py)
   run <скрипт>                 — запустить свой скрипт scripts/<скрипт>.py
   builds [all]                 — таблица построек
   name #7 <новое имя>          — переименовать
@@ -40,6 +41,7 @@ YES = {"да", "yes", "y", "д", "ага"}
 HELP = [
     "ai <что построить> — например: ai замок с четырьмя башнями",
     "ai+ #7 <что изменить> — доработать постройку #7 (без номера — последнюю)",
+    "task #7 <задача> — ИИ посмотрит на местность и сделает, например: task #7 расчисти задний двор",
     "run <скрипт> — запустить свой скрипт, например: run tower",
     "builds — список построек, name #7 <имя> — переименовать",
     "tp #7 — перенестись к постройке, delete #7 — удалить",
@@ -165,6 +167,8 @@ class Session:
             await self.run_script(player, rest)
         elif word == "ai+":
             await self.ai_modify(player, rest)
+        elif word in ("task", "задача"):
+            await self.task(player, rest)
         elif word == "ai":
             await self.ai(player, rest)
 
@@ -274,6 +278,10 @@ class Session:
             await self.say(f"#{b['id']} {b['name']} обновлена за {time.time() - t:.0f} с: "
                            f"{b['blocks']} блоков{self._failed_note(failed, count)}. Код: {script}.py")
 
+    async def task(self, player, text):
+        """Задача с видом на мир (переопределяется там, где мост умеет читать мир)."""
+        await self.say("Задачи с осмотром местности пока работают только на сервере Java")
+
     async def _generate(self, prompt, previous=None, change=None):
         """Модель пишет код; если он падает — один раз просим исправить."""
         if previous:
@@ -334,7 +342,9 @@ class Session:
             await self.say(f"#{b['id']} построил {b['owner']} — удалить может только он или админ")
             return
         self.confirm[player] = (b["id"], time.time() + CONFIRM_SECONDS)
-        await self.say(f"{player}, удалить #{b['id']} {b['name']} ({b['blocks']} блоков)? "
+        dug = any(op[-1] == "air" for op in b["ops"])
+        note = " Убранную землю это не вернёт." if dug and b.get("parent") else ""
+        await self.say(f"{player}, удалить #{b['id']} {b['name']} ({b['blocks']} блоков)?{note} "
                        f"Напиши: да (или что угодно другое — отмена)")
 
     async def answer_confirm(self, player, answer):

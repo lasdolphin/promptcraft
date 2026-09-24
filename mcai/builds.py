@@ -54,14 +54,15 @@ class BuildStore:
             n += 1
         return f"{name}-{n}"
 
-    def add(self, owner, request, script, code, ops, blocks, origin, facing):
+    def add(self, owner, request, script, code, ops, blocks, origin, facing, parent=None):
+        """parent — номер постройки, для которой это задача (расчистка, дорожка...)."""
         with self.lock:
             build_id = max(self.builds, default=0) + 1
             now = time.time()
             b = {"id": build_id, "name": self._unique_name(name_from_request(request)), "owner": owner,
                  "request": request, "script": script, "code": code, "ops": ops, "blocks": blocks,
                  "origin": list(origin), "facing": facing, "created": now, "updated": now,
-                 "history": [request]}
+                 "history": [request], "parent": parent}
             self.builds[build_id] = b
             self._write(b)
             return b
@@ -116,9 +117,10 @@ class BuildStore:
 def summary(b):
     """Без ops — для таблиц и админки."""
     return {k: b[k] for k in ("id", "name", "owner", "request", "script", "blocks", "created", "updated")} | {
-        "versions": len(b.get("history", []))}
+        "versions": len(b.get("history", [])), "parent": b.get("parent")}
 
 
 def line(b):
     date = time.strftime("%d.%m %H:%M", time.localtime(b["updated"]))
-    return f"#{b['id']} {b['name']} — {b['owner']}, {b['blocks']} бл., {date}"
+    task = f" (задача для #{b['parent']})" if b.get("parent") else ""
+    return f"#{b['id']} {b['name']}{task} — {b['owner']}, {b['blocks']} бл., {date}"
