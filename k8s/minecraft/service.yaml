@@ -30,6 +30,20 @@ spec:
       targetPort: 19133
       protocol: UDP
 ---
+# world-reader — только внутри кластера, для задач java-bridge
+apiVersion: v1
+kind: Service
+metadata:
+  name: minecraft-world
+spec:
+  selector:
+    app: minecraft
+  ports:
+    - name: world
+      port: 8090
+      targetPort: 8090
+      protocol: TCP
+---
 # RCON — только внутри кластера, для java-bridge
 apiVersion: v1
 kind: Service

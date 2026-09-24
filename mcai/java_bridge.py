@@ -18,13 +18,15 @@ import logging
 import os
 import re
 import struct
+import time
 
 import httpx
 
-from mcai import admin_web
+from mcai import admin_web, llm, sandbox, tasks
 from mcai.access import Access
 from mcai.builds import BuildStore
-from mcai.game import SCRIPTS_DIR, Session, builds_folder, safe, seed_examples, log_llm_settings
+from mcai.game import (SCRIPTS_DIR, Session, builds_folder, origin_from, safe, save_ai_script, seed_examples,
+                       log_llm_settings)
 
 log = logging.getLogger("java")
 
@@ -37,6 +39,8 @@ ADMINS = [a.strip() for a in os.environ.get("ADMINS", "").split(",") if a.strip(
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 ADMIN_PORT = int(os.environ.get("ADMIN_PORT", "8080"))
 ACCESS_FILE = os.environ.get("ACCESS_FILE", os.path.join(SCRIPTS_DIR, ".access.json"))
+# сайдкар world-reader: откуда модель смотрит на мир (mcai/world_server.py)
+WORLD_URL = os.environ.get("WORLD_URL", "")
 
 # Игроки с Bedrock (через Geyser/Floodgate) пишут с точкой перед ником: <.Steve>
 CHAT_RE = re.compile(r"\]: (?:\[Not Secure\] )?<(\.?[A-Za-z0-9_]{1,16})> (.*)$")
@@ -142,6 +146,69 @@ class JavaGame(Session):
     def is_admin(self, player):
         return self.access.is_admin(player)
 
+    async def task(self, player, text):
+        if not WORLD_URL:
+            await self.say("Задачи выключены: мост не видит мир (не задан WORLD_URL)")
+            return
+        first, _, rest = text.partition(" ")
+        build = self.builds.find(first) if first else None
+        if build:
+            text = rest.strip()
+        elif first.startswith("#"):
+            await self.say(f"Не нашёл постройку {first}. Список: builds")
+            return
+        if not text:
+            await self.say("Напиши задачу: task #7 расчисти задний двор")
+            return
+        if build and not await self._get_editable(player, first, "давать задачи для неё"):
+            return
+        async with self._one_at_a_time(player) as ok:
+            if not ok:
+                return
+            t = time.time()
+            if build:
+                frame = tasks.Frame(build["origin"], build["facing"])
+                await self.say(f"Смотрю на местность вокруг #{build['id']} {build['name']}: {text} ...")
+            else:
+                try:
+                    frame = tasks.Frame(*origin_from(*await self.player_position(player)))
+                except RuntimeError as e:
+                    await self.say(str(e))
+                    return
+                await self.say(f"Смотрю на местность перед тобой: {text} ...")
+            tools = tasks.TaskTools(tasks.WorldReader(self.rcon.command, WORLD_URL), frame, self.builds)
+            system = tasks.system_prompt(tasks.frame_note(build))
+            looked = []
+
+            async def on_tool(name, args):
+                looked.append(name)
+                log.info("task tool %s %s", name, args)
+
+            try:
+                code = await llm.run_agent(system, text, tasks.TOOLS, tools.call, on_tool=on_tool)
+                result = await asyncio.to_thread(sandbox.run, code)
+                if result["error"]:
+                    log.info("task code failed (%s), asking to fix", result["error"])
+                    code = await llm.generate_code(text, code, f"The script failed with: {result['error']}\nFix it.",
+                                                   system=system)
+                    result = await asyncio.to_thread(sandbox.run, code)
+            except llm.LLMError as e:
+                await self.say(str(e))
+                return
+            if result["error"]:
+                await self.say(f"Не получилось: {result['error']}")
+                return
+            request = f"задача для #{build['id']}: {text}" if build else text
+            script = save_ai_script(player, request, code)
+            failed, count = await self.place(result["ops"], frame.origin, frame.facing)
+            b = self.builds.add(player, text, script, code, result["ops"], result["blocks"], frame.origin,
+                                frame.facing, parent=build and build["id"])
+            for m in result["messages"]:
+                await self.say(m)
+            seen = f", осмотрел мир {len(looked)} раз" if looked else ", не осматривая мир"
+            await self.say(f"Готово за {time.time() - t:.0f} с{seen}: #{b['id']} {b['name']}, "
+                           f"{b['blocks']} блоков{self._failed_note(failed, count)}. Код: {script}.py")
+
     async def on_chat(self, player, text):
         words = text.strip().split()
         if not words:
@@ -151,7 +218,7 @@ class JavaGame(Session):
             await self.admin_command(player, cmd, words[1:])
         elif self.access.is_approved(player):
             await super().on_chat(player, text)
-        elif cmd in ("ai", "ai+", "run", "undo", "help"):
+        elif cmd in ("ai", "ai+", "run", "undo", "help", "task", "задача", "delete", "builds", "tp", "name"):
             await self.tell(player, "Ты пока гость: команды заработают, когда админ тебя одобрит.")
 
     async def admin_command(self, player, cmd, args):
@@ -254,7 +321,7 @@ async def follow_chat(game):
         try:
             lines = log_lines_from_command(cmd) if cmd else log_lines_from_kubernetes()
             # новый лог — возможно, сервер перезапустился: сверить списки и режим приёма
-            await safe(game.access.sync())
+            sync_task = asyncio.create_task(game.access.sync_with_retry())
             async for line in lines:
                 line = ANSI_RE.sub("", line).rstrip()
                 # вход/выход игроков — по порядку, чтобы одобрение не обогнало вход

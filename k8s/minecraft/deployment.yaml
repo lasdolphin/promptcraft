@@ -108,6 +108,35 @@ spec:
             - name: geyser-config
               mountPath: /plugins/Geyser-Spigot/config.yml
               subPath: config.yml
+        # Читает мир из файлов сервера (только чтение) для задач ИИ: task #7 ... — см. mcai/world_server.py
+        - name: world-reader
+          image: ghcr.io/lasdolphin/promptcraft-bridge:latest
+          imagePullPolicy: Always
+          command: ["python", "-m", "mcai.world_server"]
+          ports:
+            - containerPort: 8090
+              name: world
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8090
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+              readOnly: true
       volumes:
         - name: geyser-config
           configMap:
