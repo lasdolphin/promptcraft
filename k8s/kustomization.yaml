@@ -17,3 +17,4 @@ resources:
   - bridge/deployment.yaml
   - bridge/service.yaml
   - bridge/httproute.yaml
+  - bridge/admin-httproute.yaml

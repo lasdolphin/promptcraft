@@ -50,7 +50,7 @@ spec:
             # иначе игроки с Bedrock (Geyser) не могут писать в чат: у них нет ключа подписи Java
             - name: ENFORCE_SECURE_PROFILE
               value: "false"
-            # Игроков одобряют в админке java-bridge (http://192.168.2.244:8080) или командой allow в чате.
+            # Игроков одобряют в админке java-bridge (https://promptcraft-admin.antfarm.dev) или командой allow в чате.
             # При старте whitelist включён; открыт ли приём, java-bridge решает сразу после запуска.
             - name: ENABLE_WHITELIST
               value: "true"

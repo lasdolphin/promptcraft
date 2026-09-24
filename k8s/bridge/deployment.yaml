@@ -81,7 +81,7 @@ spec:
             # админы сервера (могут одобрять игроков командой allow в чате)
             - name: ADMINS
               value: .MattOmelett,.TrivialWig39433
-            # пароль админки http://192.168.2.244:8080
+            # пароль админки https://promptcraft-admin.antfarm.dev
             - name: ADMIN_TOKEN
               valueFrom:
                 secretKeyRef:

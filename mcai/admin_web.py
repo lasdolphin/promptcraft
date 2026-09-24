@@ -1,19 +1,25 @@
-"""Админка сервера Java: кто онлайн, кто ждёт одобрения, кто одобрен; приём новых игроков вкл/выкл.
+"""Админка сервера Java: игроки (кто ждёт одобрения, кто одобрен, приём вкл/выкл) и постройки.
 
-Страница открывается по http://<адрес моста>:8080, пароль — переменная ADMIN_TOKEN.
+Страница открывается по https://promptcraft-admin.antfarm.dev (порт 8080 моста), пароль — переменная ADMIN_TOKEN.
 """
 import hmac
 import logging
 
 from aiohttp import web
 
+from mcai.builds import BuildError, summary
+
 log = logging.getLogger("admin")
 
 COOKIE = "promptcraft_admin"
 
 
-def make_app(access, token):
+def make_app(game, token):
     app = web.Application()
+    access = game.access
+
+    def full_state():
+        return access.state() | {"builds": [summary(b) for b in game.builds.listing()]}
 
     def authorized(request):
         return bool(token) and hmac.compare_digest(request.cookies.get(COOKIE, ""), token)
@@ -27,7 +33,9 @@ def make_app(access, token):
         form = await request.post()
         if token and hmac.compare_digest(str(form.get("password", "")), token):
             resp = web.HTTPFound("/")
-            resp.set_cookie(COOKIE, token, httponly=True, samesite="Strict", max_age=90 * 24 * 3600)
+            https = request.secure or request.headers.get("X-Forwarded-Proto") == "https"
+            resp.set_cookie(COOKIE, token, httponly=True, samesite="Strict", secure=https,
+                            max_age=90 * 24 * 3600)
             return resp
         return web.Response(text=LOGIN_PAGE.replace("<!--error-->", "<p class=err>Неверный пароль</p>"),
                             content_type="text/html", status=401)
@@ -45,13 +53,25 @@ def make_app(access, token):
         return wrapped
 
     async def state(request):
-        return access.state()
+        return full_state()
 
     async def action(request):
         body = await request.json()
         name = access.resolve(body.get("name", "")) or body.get("name", "")
         kind = request.match_info["action"]
-        if kind == "approve":
+        if kind in ("build-rename", "build-delete"):
+            b = game.builds.builds.get(int(body.get("id", 0)))
+            if not b:
+                return {"message": "Постройка не найдена", "state": full_state()}
+            if kind == "build-rename":
+                try:
+                    message = f"Теперь #{b['id']} называется {game.builds.rename(b['id'], body.get('name', ''))['name']}"
+                except BuildError as e:
+                    message = str(e)
+            else:
+                await game.remove_build(b)
+                message = f"Удалена #{b['id']} {b['name']}"
+        elif kind == "approve":
             message = await access.approve(name)
         elif kind == "remove":
             message = await access.remove(name)
@@ -61,8 +81,8 @@ def make_app(access, token):
             message = await access.set_open(body.get("open"))
         else:
             raise web.HTTPNotFound()
-        log.info("admin: %s %s -> %s", kind, name, message)
-        return {"message": message, "state": access.state()}
+        log.info("admin: %s %s -> %s", kind, name or body.get("id"), message)
+        return {"message": message, "state": full_state()}
 
     app.router.add_get("/", index)
     app.router.add_post("/login", login)
@@ -71,11 +91,11 @@ def make_app(access, token):
     return app
 
 
-async def start(access, token, port):
+async def start(game, token, port):
     if not token:
         log.warning("ADMIN_TOKEN not set: admin page is disabled")
         return
-    runner = web.AppRunner(make_app(access, token), access_log=None)
+    runner = web.AppRunner(make_app(game, token), access_log=None)
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", port).start()
     log.info("admin page on :%d", port)
@@ -123,6 +143,7 @@ ADMIN_PAGE = f"""<!doctype html><html lang=ru><head><meta charset=utf-8>
 <div class=hint id=openHint></div></div><button id=openBtn></button></div></div>
 <h2>Ждут одобрения</h2><div class=card id=pending></div>
 <h2>Одобрены</h2><div class=card id=approved></div>
+<h2>Постройки</h2><div class=card id=builds></div>
 <div id=toast></div>
 <script>
 let S = null;
@@ -155,9 +176,36 @@ function render(s) {{
       (on.has(n) ? "<span class=chip><span class=dot>●</span> онлайн</span>" : "") +
       (s.admins.includes(n.toLowerCase()) ? "<span class=chip>админ</span>" : ""),
       btn("Удалить", "remove", n, "bad"))).join("")
-    : "<div class=empty>Пока никого</div>"; }}
+    : "<div class=empty>Пока никого</div>";
+  renderBuilds(s.builds); }}
+// строка постройки: обычная, «переименовать» (поле ввода) или «удалить?» (подтверждение)
+let editing = null;   // {{id, mode: "rename" | "delete"}}
+function renderBuilds(list) {{
+  $("builds").innerHTML = list.length ? list.map(b => {{
+    const date = new Date(b.updated * 1000).toLocaleString("ru", {{day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit"}});
+    const meta = `<div class=hint>${{esc(b.owner)}} · ${{b.blocks}} бл. · ${{date}}${{b.versions > 1 ? " · версий: " + b.versions : ""}}</div>
+      <div class=hint title="${{esc(b.request)}}">«${{esc(b.request.length > 70 ? b.request.slice(0, 70) + "…" : b.request)}}»</div>`;
+    let actions;
+    if (editing && editing.id === b.id && editing.mode === "rename") {{
+      actions = `<input id=newName value="${{esc(b.name)}}" style="width:140px">
+        <button class=go onclick="doRename(${{b.id}})">OK</button> <button onclick="stopEdit()">Отмена</button>`;
+    }} else if (editing && editing.id === b.id && editing.mode === "delete") {{
+      actions = `<span class=hint>Удалить из мира?</span> <button class=bad onclick="doDelete(${{b.id}})">Да, удалить</button>
+        <button onclick="stopEdit()">Нет</button>`;
+    }} else {{
+      actions = `<button onclick="startEdit(${{b.id}}, 'rename')">Имя</button>
+        <button class=bad onclick="startEdit(${{b.id}}, 'delete')">Удалить</button>`;
+    }}
+    return `<div class=row><div class=name>#${{b.id}} ${{esc(b.name)}}${{meta}}</div><div>${{actions}}</div></div>`;
+  }}).join("") : "<div class=empty>Построек пока нет</div>"; }}
+function startEdit(id, mode) {{ editing = {{id, mode}}; renderBuilds(S.builds);
+  if (mode === "rename") {{ const i = $("newName"); i.focus(); i.select();
+    i.onkeydown = e => {{ if (e.key === "Enter") doRename(id); if (e.key === "Escape") stopEdit(); }}; }} }}
+function stopEdit() {{ editing = null; renderBuilds(S.builds); }}
+async function doRename(id) {{ const name = $("newName").value; editing = null; await call("build-rename", {{id, name}}); }}
+async function doDelete(id) {{ editing = null; await call("build-delete", {{id}}); }}
 $("openBtn").onclick = () => call("open", {{open: !S.open}});
-async function refresh() {{ const r = await fetch("/api/state");
+async function refresh() {{ if (editing) return; const r = await fetch("/api/state");
   if (r.status === 401) {{ location.reload(); return; }} render(await r.json()); }}
 refresh(); setInterval(refresh, 5000);
 </script></main></body></html>"""

@@ -23,7 +23,8 @@ import httpx
 
 from mcai import admin_web
 from mcai.access import Access
-from mcai.game import SCRIPTS_DIR, Session, safe, seed_examples, log_llm_settings
+from mcai.builds import BuildStore
+from mcai.game import SCRIPTS_DIR, Session, builds_folder, safe, seed_examples, log_llm_settings
 
 log = logging.getLogger("java")
 
@@ -134,9 +135,12 @@ class JavaGame(Session):
     parallel = RCON_CONNECTIONS
 
     def __init__(self, rcon):
-        super().__init__()
+        super().__init__(BuildStore(builds_folder("java")))
         self.rcon = rcon
         self.access = Access(self.rcon.command, self.tell, ADMINS, ACCESS_FILE)
+
+    def is_admin(self, player):
+        return self.access.is_admin(player)
 
     async def on_chat(self, player, text):
         words = text.strip().split()
@@ -270,7 +274,7 @@ async def main():
     seed_examples()
     log_llm_settings()
     game = JavaGame(RconPool(RCON_CONNECTIONS))
-    await admin_web.start(game.access, ADMIN_TOKEN, ADMIN_PORT)
+    await admin_web.start(game, ADMIN_TOKEN, ADMIN_PORT)
     log.info("RCON %s:%d, admins %s, waiting for chat commands", RCON_HOST, RCON_PORT, ADMINS or "-")
     await follow_chat(game)
 
